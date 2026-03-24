@@ -1,2 +1,3 @@
 org.springframework.boot.autoconfigure.EnableAutoConfiguration=\
-  com.get401.auth.spring.Get401AuthAutoConfiguration
+  com.get401.auth.spring.Get401AuthAutoConfiguration,\
+  com.get401.auth.spring.Get401ClientAutoConfiguration

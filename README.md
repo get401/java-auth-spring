@@ -1,31 +1,29 @@
 # Get401 Auth Spring
 
-The **Get401 Auth Spring** library is a seamless Spring Boot / Spring Web MVC integration for the [Get401](https://app.get401.com) identity platform. It builds upon the solid foundation of `get401-auth-core` by providing a native Spring `HandlerInterceptor` that enforces declarative authentication and authorization natively on your Spring controllers.
+**Get401 Auth Spring** is the official Spring Boot integration for the [Get401](https://app.get401.com) identity platform. Add the dependency, set two properties, and your application gains annotation-driven JWT authentication, role and scope enforcement, and a fully injectable user management client.
 
 ---
 
-## 🚀 Features
+## Features
 
-- **Seamless Spring MVC Integration:** Validates JSON Web Tokens (JWT) natively within the Spring HTTP request lifecycle.
-- **Annotation-Driven Security:** Enforce Authentication (`@AuthGet401`), Role-Based Access Control (`@VerifyRoles`), and Scopes (`@VerifyScope`) directly on your controllers or handler methods.
-- **Automatic Request Enrichment:** Injects `jwtClaims` and `jwtSubject` into the `HttpServletRequest` attributes upon successful authentication, allowing easy access inside your controllers.
-- **Dynamic Ed25519 Key Fetching:** Inherits the core `JwtPublicKeyProvider` for fast, cached, and secure fetching of your application public key directly from the Get401 platform.
-- **Cookie-Based Flow:** Automatically extracts tokens natively expected from the `aact` secure cookie.
+- **Zero-boilerplate setup:** Auto-configures everything from `application.yml` — no manual bean wiring required.
+- **Annotation-driven security:** Enforce authentication (`@AuthGet401`), roles (`@VerifyRoles`), and scopes (`@VerifyScope`) directly on controllers or individual handler methods.
+- **Request enrichment:** Injects `jwtClaims` and `jwtSubject` as request attributes on every authenticated request.
+- **User management client:** Auto-configured `Get401Client` bean for server-to-server user operations — list, retrieve, and disable users via the Get401 backend API.
+- **Dynamic Ed25519 key fetching:** Cached public key provisioning directly from the Get401 platform, refreshed automatically on expiry.
 
-## 📦 Requirements
+## Requirements
 
-- **Java:** Version 21 or higher.
-- **Spring Boot:** Tested with 3.2.x+ (requires `spring-boot-starter-web`).
+- **Java:** 21 or higher
+- **Spring Boot:** 3.2.x+ with `spring-boot-starter-web`
 
-## 🛠️ Installation
-
-Add the dependency to your project. *(If you are working with a snapshot or local build, ensure you have your local repository configured: `mavenLocal()` in Gradle).*
+## Installation
 
 ### Gradle
 
 ```groovy
 dependencies {
-    implementation 'com.get401:get401-auth-spring:0.0.1-SNAPSHOT'
+    implementation 'com.get401:auth-spring:0.0.1'
 }
 ```
 
@@ -34,134 +32,165 @@ dependencies {
 ```xml
 <dependency>
     <groupId>com.get401</groupId>
-    <artifactId>get401-auth-spring</artifactId>
-    <version>0.0.1-SNAPSHOT</version>
+    <artifactId>auth-spring</artifactId>
+    <version>0.0.1</version>
 </dependency>
 ```
 
 ---
 
-## ⚙️ Setup & Configuration
+## Configuration
 
-To integrate the library, you must provide a `JwtPublicKeyProvider` bean configured with your application's details, and then register the `JwtAuthenticationInterceptor` with Spring MVC.
+All features are driven by properties. Add the relevant sections to your `application.yml`:
 
-### 1. Register Beans and Interceptor
+```yaml
+get401:
+  # Required for JWT authentication and annotation enforcement
+  auth:
+    app-id: your-get401-app-id
+    origin: https://yourdomain.com
+    # base-url: https://app.get401.com  # optional, defaults to the Get401 platform
 
-Create a configuration class that implements `WebMvcConfigurer` to register the interceptor within your application context:
-
-```java
-import com.get401.auth.core.JwtPublicKeyProvider;
-import com.get401.auth.spring.JwtAuthenticationInterceptor;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
-import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
-import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
-
-@Configuration
-public class Get401SecurityConfig implements WebMvcConfigurer {
-
-    // 1. Declare your public key provider bean
-    @Bean
-    public JwtPublicKeyProvider jwtPublicKeyProvider() {
-        String appId = "your-get401-app-id";
-        String origin = "https://yourdomain.com"; // Expected origin your tokens are tied to
-        
-        // Optional 3rd parameter: Get401 base URL. Null defaults to "https://app.get401.com"
-        return new JwtPublicKeyProvider(appId, origin, null);
-    }
-
-    // Spring will automatically inject the JwtPublicKeyProvider above into the interceptor
-    private final JwtAuthenticationInterceptor jwtAuthenticationInterceptor;
-
-    public Get401SecurityConfig(JwtAuthenticationInterceptor jwtAuthenticationInterceptor) {
-        this.jwtAuthenticationInterceptor = jwtAuthenticationInterceptor;
-    }
-
-    // 2. Register the interceptor against all endpoints
-    @Override
-    public void addInterceptors(InterceptorRegistry registry) {
-        registry.addInterceptor(jwtAuthenticationInterceptor)
-                .addPathPatterns("/**"); // Applies globally, but annotations dictate actual enforcement
-    }
-}
+  # Required only if you need the user management client (Get401Client)
+  client:
+    api-key: sk_live_your_api_key
+    # base-url: https://app.get401.com  # optional
 ```
+
+That's all. The interceptor and client beans are registered automatically.
 
 ---
 
-## 💻 Usage
+## JWT Authentication
 
-Once the interceptor is registered, apply Get401 annotations to your `@RestController` classes or specific endpoint methods.
+### Securing Controllers
 
-### 1. Securing Controllers with Annotations
+Apply annotations to your `@RestController` classes or individual methods. The interceptor only activates on handlers that carry at least one Get401 annotation — unannotated endpoints are never touched.
 
 ```java
-import com.get401.auth.core.annotation.AuthGet401;
-import com.get401.auth.core.annotation.VerifyRoles;
-import com.get401.auth.core.annotation.VerifyScope;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RestController;
-
 @RestController
-@AuthGet401 // Base requirement: request must have a valid JWT cookie
+@AuthGet401  // All methods in this controller require a valid JWT
 public class SecureApiController {
 
-    @GetMapping("/api/public-but-logged-in")
-    public String openEndpoint() {
-        return "You have a valid JWT token!";
+    @GetMapping("/api/profile")
+    public String profile() {
+        return "Authenticated.";
     }
 
     @VerifyRoles({"admin", "editor"})
     @GetMapping("/api/admin/dashboard")
     public String adminDashboard() {
-        // Only accessible if your JWT contains the "admin" or "editor" role
-        return "Welcome to the admin dashboard.";
+        // Requires at least one of the listed roles in the JWT
+        return "Welcome, admin.";
     }
 
     @VerifyScope({"write:billing"})
     @GetMapping("/api/billing/update")
     public String updateBilling() {
-        // Only accessible if the scope string contains precisely "write:billing"
-        return "Billing updated successfully.";
+        // Requires all listed scopes to be present in the JWT
+        return "Billing updated.";
     }
 }
 ```
 
-### 2. Accessing Token Claims in Controllers
+Annotations can be placed on the class (applies to all methods) or on individual methods (overrides nothing — both levels are checked). `@VerifyRoles` and `@VerifyScope` imply `@AuthGet401`; you do not need to stack all three.
 
-The `JwtAuthenticationInterceptor` extracts the JWT claims and subject and injects them into the HTTP Request attributes. You can extract these directly in your Spring controllers using `@RequestAttribute`:
+### Accessing Token Data in Controllers
+
+On a successful authentication, `jwtClaims` and `jwtSubject` are injected as request attributes. Access them with `@RequestAttribute`:
 
 ```java
-import io.jsonwebtoken.Claims;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RequestAttribute;
-import org.springframework.web.bind.annotation.RestController;
-
 @RestController
 @AuthGet401
-public class UserProfileController {
+public class MeController {
 
     @GetMapping("/api/me")
-    public String getMyProfile(
+    public String me(
             @RequestAttribute("jwtSubject") String userId,
             @RequestAttribute("jwtClaims") Claims claims) {
-        
+
         String email = claims.get("email", String.class);
-        return String.format("Hello %s, your User ID is %s", email, userId);
+        return String.format("Hello %s — ID: %s", email, userId);
     }
+}
+```
+
+### How the Interceptor Works
+
+1. Every incoming request passes through `JwtAuthenticationInterceptor`.
+2. If the target handler has no Get401 annotation, the request continues immediately.
+3. The `aact` cookie is extracted. Missing cookie → `401 Unauthorized`.
+4. The JWT signature is verified against the cached Ed25519 public key fetched from Get401. Invalid token → `401 Unauthorized`.
+5. Role and scope claims are checked against `@VerifyRoles` / `@VerifyScope` constraints. Insufficient access → `403 Forbidden`.
+6. On success, `jwtClaims` (`Claims`) and `jwtSubject` (`String`) are set as request attributes.
+
+---
+
+## User Management Client
+
+When `get401.client.api-key` is set, a `Get401Client` bean is auto-configured and available for injection anywhere in your application. It is intended for trusted server-to-server use only.
+
+```java
+@Service
+public class UserAdminService {
+
+    private final Get401Client get401Client;
+
+    public UserAdminService(Get401Client get401Client) {
+        this.get401Client = get401Client;
+    }
+
+    public User getUser(String userId) {
+        return get401Client.getUserById(userId);
+    }
+
+    public List<User> getAllUsers() {
+        List<User> all = new ArrayList<>();
+        UsersPage page = get401Client.listUsers();
+        while (page != null) {
+            all.addAll(page.getItems());
+            page = page.getNext() != null ? get401Client.listUsers(page.getNext()) : null;
+        }
+        return all;
+    }
+
+    public void disableUser(String userId) {
+        get401Client.disableUser(userId);
+    }
+}
+```
+
+All client methods throw `Get401ApiException` (a `RuntimeException`) on non-2xx responses, exposing the HTTP status code and an error code string:
+
+```java
+try {
+    get401Client.getUserById("usr_unknown");
+} catch (Get401ApiException e) {
+    // e.getStatus()    — HTTP status code (e.g. 404)
+    // e.getErrorCode() — platform error string (e.g. "not_found")
 }
 ```
 
 ---
 
-## 🛡️ How It Works Internal Flow
+## Advanced: Overriding Auto-Configured Beans
 
-1. **Pre-handling Request:** The `JwtAuthenticationInterceptor` intercepts all registered routes.
-2. **Annotation Check:** Verification only executes if the targeted class or method has `@AuthGet401`, `@VerifyRoles`, or `@VerifyScope`. If missing, the request passes through cleanly.
-3. **Cookie Extraction:** The interceptor looks for an `aact` cookie. If not provided, yields `401 Unauthorized`.
-4. **Signature Verification:** Safely validates the token's Ed25519 cryptographic signature using the dynamically refreshed key.
-5. **Role & Scope Evaluations:** Runs assertions on constraints specified in `@VerifyRoles` and `@VerifyScope`. 
-6. **Request Augmentation:** Success injects standard token claims into Request Attributes: `jwtClaims` and `jwtSubject`.
+Both beans support `@ConditionalOnMissingBean`. Declare your own bean to take full control:
 
-## ⚖️ License
+```java
+@Bean
+public JwtPublicKeyProvider jwtPublicKeyProvider() {
+    return new JwtPublicKeyProvider("your-app-id", "https://yourdomain.com", null);
+}
 
-All rights reserved by Get401.
+@Bean
+public Get401Client get401Client() {
+    return new Get401Client("sk_live_your_key", "https://staging.get401.com");
+}
+```
+
+---
+
+## License
+
+Apache 2.0
